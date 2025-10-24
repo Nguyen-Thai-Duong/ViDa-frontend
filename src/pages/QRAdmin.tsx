@@ -1,7 +1,9 @@
+// src/pages/QRAdmin.tsx
 import React, { useState, useEffect } from 'react';
 import QRCode from 'react-qr-code';
 import * as QRCodeLib from 'qrcode';
 import AdminAuth from '../components/AdminAuth';
+import { api } from '../api';
 
 interface Product {
     id: string;
@@ -11,6 +13,8 @@ interface Product {
     batchNumber: string;
     producer: string;
     description: string;
+    website?: string;
+    lookupUrl?: string; // dùng để nhúng vào QR
 }
 
 const QRAdmin: React.FC = () => {
@@ -27,50 +31,41 @@ const QRAdmin: React.FC = () => {
     });
     const [showQR, setShowQR] = useState(false);
     const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+    const [busy, setBusy] = useState(false);
 
+    // Đánh thức backend khi vào trang & restore đăng nhập
     useEffect(() => {
-        // Check if user is already authenticated
         const authStatus = sessionStorage.getItem('adminAuth');
-        if (authStatus === 'true') {
-            setIsAuthenticated(true);
-        }
+        if (authStatus === 'true') setIsAuthenticated(true);
+
+        api.health().catch(() => { /* ignore */ });
     }, []);
 
-    const handleAuthSuccess = () => {
-        setIsAuthenticated(true);
-    };
-
-    const generateProductId = () => {
-        const timestamp = Date.now();
-        const random = Math.floor(Math.random() * 1000);
-        return `ViDa-${timestamp}-${random}`;
-    };
+    const handleAuthSuccess = () => setIsAuthenticated(true);
 
     const handleCreateProduct = async (e: React.FormEvent) => {
         e.preventDefault();
+        if (busy) return;
+        setBusy(true);
 
         try {
-            const response = await fetch('http://localhost:5000/api/qr/create', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    name: newProduct.name,
-                    type: newProduct.type,
-                    batchNumber: newProduct.batchNumber,
-                    producer: newProduct.producer,
-                    description: newProduct.description
-                })
+            const res = await api.createProduct({
+                name: newProduct.name,
+                type: newProduct.type,
+                batchNumber: newProduct.batchNumber,
+                producer: newProduct.producer,
+                description: newProduct.description
             });
 
-            const result = await response.json();
+            const result = await res.json();
 
-            if (result.success) {
+            if (result?.success) {
                 const product: Product = result.data;
-                setProducts([...products, product]);
+                // Lưu và show QR
+                setProducts(prev => [product, ...prev]);
                 setSelectedProduct(product);
                 setShowQR(true);
+                // Clear form
                 setNewProduct({
                     id: '',
                     name: '',
@@ -82,17 +77,20 @@ const QRAdmin: React.FC = () => {
                 });
                 console.log('✅ Product created successfully:', product);
             } else {
-                console.error('❌ Error creating product:', result.message);
-                alert('Lỗi tạo sản phẩm: ' + result.message);
+                console.error('❌ Error creating product:', result?.message);
+                alert('Lỗi tạo sản phẩm: ' + (result?.message || 'Không rõ nguyên nhân'));
             }
         } catch (error) {
             console.error('❌ Connection error:', error);
-            alert('Không thể kết nối đến server. Đảm bảo backend đang chạy.');
+            alert('Không thể kết nối đến server. Hãy chắc chắn backend đã chạy và REACT_APP_API_URL đúng.');
+        } finally {
+            setBusy(false);
         }
     };
 
+    // Giá trị đưa vào QR: ưu tiên lookupUrl từ backend (scan sẽ mở trang tra cứu)
     const generateQRData = (product: Product) => {
-        return product.id;
+        return product.lookupUrl ?? product.id;
     };
 
     const downloadQR = async (product: Product) => {
@@ -105,7 +103,6 @@ const QRAdmin: React.FC = () => {
         link.click();
     };
 
-    // Show authentication screen if not authenticated
     if (!isAuthenticated) {
         return <AdminAuth onSuccess={handleAuthSuccess} />;
     }
@@ -217,9 +214,10 @@ const QRAdmin: React.FC = () => {
 
                             <button
                                 type="submit"
-                                className="w-full bg-green-600 text-white py-2 px-4 rounded-md hover:bg-green-700 transition-colors font-medium"
+                                disabled={busy}
+                                className="w-full bg-green-600 text-white py-2 px-4 rounded-md hover:bg-green-700 transition-colors font-medium disabled:opacity-60"
                             >
-                                Tạo sản phẩm & QR Code
+                                {busy ? 'Đang tạo...' : 'Tạo sản phẩm & QR Code'}
                             </button>
                         </form>
                     </div>
@@ -234,7 +232,7 @@ const QRAdmin: React.FC = () => {
                                     <QRCode
                                         value={generateQRData(selectedProduct)}
                                         size={200}
-                                        style={{ height: "auto", maxWidth: "100%", width: "100%" }}
+                                        style={{ height: 'auto', maxWidth: '100%', width: '100%' }}
                                     />
                                 </div>
 
@@ -245,6 +243,19 @@ const QRAdmin: React.FC = () => {
                                     <p><strong>Ngày sản xuất:</strong> {selectedProduct.productionDate}</p>
                                     <p><strong>Số lô:</strong> {selectedProduct.batchNumber}</p>
                                     <p><strong>Người sản xuất:</strong> {selectedProduct.producer}</p>
+                                    {selectedProduct.lookupUrl && (
+                                        <p className="truncate">
+                                            <strong>Tra cứu:</strong>{' '}
+                                            <a
+                                                className="text-blue-600 underline"
+                                                href={selectedProduct.lookupUrl}
+                                                target="_blank"
+                                                rel="noreferrer"
+                                            >
+                                                {selectedProduct.lookupUrl}
+                                            </a>
+                                        </p>
+                                    )}
                                 </div>
 
                                 <button

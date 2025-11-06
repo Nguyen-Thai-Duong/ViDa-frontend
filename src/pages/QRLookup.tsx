@@ -40,7 +40,7 @@ const QRLookup: React.FC = () => {
         setError('');
 
         try {
-            const response = await fetch(`http://localhost:5000/api/qr/lookup/${id}`);
+            const response = await fetch(`${process.env.REACT_APP_API_URL}/api/qr/lookup/${id}`);
             const result = await response.json();
 
             if (result.success) {
